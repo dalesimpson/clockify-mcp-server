@@ -32,6 +32,18 @@ class Task(BaseModel):
     project_id: Optional[str] = Field(None, alias="projectId")
 
 
+class TaskSummary(BaseModel):
+    """Summary information for a project task."""
+
+    id: str
+    name: str
+    status: Optional[str] = None
+    project_id: Optional[str] = Field(None, alias="projectId")
+
+    class Config:
+        populate_by_name = True
+
+
 class Tag(BaseModel):
     """Tag information."""
 

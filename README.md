@@ -7,7 +7,7 @@ A FastMCP server that provides read-only access to Clockify time tracking data. 
 - 🔍 Query time entries by user, date range, and project
 - 📊 Get detailed time entry information
 - 👥 List workspace users
-- 📁 List projects and tags
+- 📁 List projects, active project tasks, and tags
 - ⏱️ Get currently running time entries
 - 🏢 Access workspace information
 
@@ -84,6 +84,22 @@ Get all projects in the workspace.
 **Parameters:**
 - `include_archived` (optional): Include archived projects (default: False)
 
+#### `list_active_project_tasks`
+Get active tasks for a specific project.
+
+**Parameters:**
+- `project_id` (required): Project ID
+
+**Returns:**
+JSON array of active task objects with `id`, `name`, `status`, and `project_id`.
+
+**Example:**
+```python
+list_active_project_tasks(
+    project_id="25b687e29ae1f428e7ebe123"
+)
+```
+
 #### `list_tags`
 Get all tags in the workspace.
 
@@ -100,6 +116,7 @@ This MCP server is designed to be used with AI agents. Example queries:
 
 - "Show me all time entries for the last week"
 - "What projects am I tracking time on?"
+- "Show me the active task IDs for project X"
 - "How many hours did I work on project X in January?"
 - "Who is currently tracking time?"
 

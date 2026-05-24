@@ -1,5 +1,6 @@
 """Clockify MCP Server for querying time tracking data."""
 
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -104,6 +105,24 @@ async def list_projects(include_archived: bool = False) -> str:
     """
     projects = await client.get_projects(archived=include_archived)
     return "\n".join([project.model_dump_json(indent=2) for project in projects])
+
+
+@mcp.tool
+async def list_active_project_tasks(project_id: str) -> str:
+    """
+    Get active tasks for a specific project.
+
+    Args:
+        project_id: The ID of the project whose active tasks to retrieve
+
+    Returns:
+        JSON array containing active task IDs, names, statuses, and project IDs
+    """
+    tasks = await client.get_active_project_tasks(project_id=project_id)
+    return json.dumps(
+        [task.model_dump(by_alias=False) for task in tasks],
+        indent=2,
+    )
 
 
 @mcp.tool

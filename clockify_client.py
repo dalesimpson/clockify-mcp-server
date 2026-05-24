@@ -6,7 +6,7 @@ from typing import Any, Optional
 import httpx
 
 from config import config
-from models import ProjectSummary, Tag, TimeEntry, User, Workspace
+from models import ProjectSummary, Tag, TaskSummary, TimeEntry, User, Workspace
 
 
 class ClockifyClient:
@@ -21,11 +21,18 @@ class ClockifyClient:
 
     async def _get(self, endpoint: str, params: Optional[dict[str, Any]] = None) -> Any:
         """Make a GET request to the Clockify API."""
+        data, _ = await self._get_response(endpoint, params=params)
+        return data
+
+    async def _get_response(
+        self, endpoint: str, params: Optional[dict[str, Any]] = None
+    ) -> tuple[Any, httpx.Headers]:
+        """Make a GET request to the Clockify API and return data with headers."""
         url = f"{self.base_url}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=self.headers, params=params)
             response.raise_for_status()
-            return response.json()
+            return response.json(), response.headers
 
     async def get_workspace(self, workspace_id: Optional[str] = None) -> Workspace:
         """Get workspace information."""
@@ -55,6 +62,70 @@ class ClockifyClient:
         ws_id = workspace_id or self.workspace_id
         data = await self._get(f"/workspaces/{ws_id}/tags")
         return [Tag.model_validate(tag) for tag in data]
+
+    async def get_project_tasks(
+        self,
+        project_id: str,
+        workspace_id: Optional[str] = None,
+        is_active: bool = True,
+        page_size: int = 50,
+    ) -> list[TaskSummary]:
+        """Get tasks for a specific project."""
+        ws_id = workspace_id or self.workspace_id
+        tasks: list[TaskSummary] = []
+        page = 1
+
+        while True:
+            params: dict[str, Any] = {
+                "is-active": str(is_active).lower(),
+                "page": page,
+                "page-size": page_size,
+                "sort-column": "NAME",
+                "sort-order": "ASCENDING",
+            }
+            data, headers = await self._get_response(
+                f"/workspaces/{ws_id}/projects/{project_id}/tasks",
+                params=params,
+            )
+            page_tasks = [TaskSummary.model_validate(task) for task in data]
+            tasks.extend(page_tasks)
+
+            last_page = headers.get("Last-Page", "").lower() == "true"
+            if last_page or len(page_tasks) < page_size:
+                break
+
+            page += 1
+
+        return tasks
+
+    async def get_active_project_tasks(
+        self,
+        project_id: str,
+        workspace_id: Optional[str] = None,
+        page_size: int = 50,
+    ) -> list[TaskSummary]:
+        """Get active tasks for a specific project."""
+        tasks = await self.get_project_tasks(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            is_active=True,
+            page_size=page_size,
+        )
+        active_tasks: list[TaskSummary] = []
+
+        for task in tasks:
+            if task.status and task.status.upper() != "ACTIVE":
+                continue
+            active_tasks.append(
+                TaskSummary(
+                    id=task.id,
+                    name=task.name,
+                    status="ACTIVE",
+                    project_id=task.project_id or project_id,
+                )
+            )
+
+        return active_tasks
 
     async def get_time_entry(
         self,
