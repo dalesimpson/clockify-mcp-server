@@ -1,19 +1,22 @@
 """Clockify MCP Server for querying time tracking data."""
 
 import json
-from datetime import datetime
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from clockify_client import ClockifyClient
+from clockify_client import UNSET, ClockifyClient
 
 # Initialize FastMCP server
 mcp = FastMCP(
     name="Clockify Time Tracker",
     instructions="""
-    This server provides read-only access to Clockify time tracking data.
-    Use these tools to query time entries, projects, users, and workspace information.
+    This server provides access to Clockify time tracking data.
+    Use the read tools to query time entries, projects, tasks, tags, users, and
+    workspace information. Use create_time_entry, update_time_entry, and
+    delete_time_entry to write time entries for the API key's user.
+    Times without a UTC offset are interpreted in the configured local timezone
+    (CLOCKIFY_TIMEZONE, default America/Toronto).
     """,
 )
 
@@ -33,20 +36,20 @@ async def get_time_entries(
     
     Args:
         user_id: The ID of the user whose time entries to retrieve
-        start_date: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-        end_date: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+        start_date: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+            Values without an offset are local time (default America/Toronto).
+        end_date: End date in ISO format. A date-only value includes that whole day.
         project_id: Optional project ID to filter entries
-    
+
+    Returns all matching entries (pagination is handled automatically).
+
     Returns:
         JSON string containing list of time entries
     """
-    start = datetime.fromisoformat(start_date) if start_date else None
-    end = datetime.fromisoformat(end_date) if end_date else None
-    
     entries = await client.get_user_time_entries(
         user_id=user_id,
-        start_date=start,
-        end_date=end,
+        start_date=start_date,
+        end_date=end_date,
         project_id=project_id,
     )
     
@@ -147,6 +150,114 @@ async def get_workspace_info() -> str:
     """
     workspace = await client.get_workspace()
     return workspace.model_dump_json(indent=2)
+
+
+@mcp.tool
+async def get_current_user() -> str:
+    """
+    Get the Clockify user that owns the API key (the user time entries are created for).
+
+    Returns:
+        JSON string with the user's ID, name, and email
+    """
+    user = await client.get_current_user()
+    return user.model_dump_json(indent=2)
+
+
+@mcp.tool
+async def create_time_entry(
+    start: str,
+    end: str,
+    description: Optional[str] = None,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    billable: Optional[bool] = None,
+    tag_ids: Optional[list[str]] = None,
+) -> str:
+    """
+    Create a completed time entry for the API key's user.
+
+    Args:
+        start: Start time in ISO format, e.g. "2026-09-15T09:00:00". Values without
+            an offset are local time (default America/Toronto).
+        end: End time in ISO format, same rules as start.
+        description: Entry description
+        project_id: Project ID (see list_projects)
+        task_id: Task ID within the project (see list_active_project_tasks)
+        billable: Whether the entry is billable (omit to use the project default)
+        tag_ids: Optional list of tag IDs (see list_tags)
+
+    Returns:
+        JSON string containing the created time entry
+    """
+    entry = await client.create_time_entry(
+        start=start,
+        end=end,
+        description=description,
+        project_id=project_id,
+        task_id=task_id,
+        billable=billable,
+        tag_ids=tag_ids,
+    )
+    return entry.model_dump_json(indent=2)
+
+
+@mcp.tool
+async def update_time_entry(
+    entry_id: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    description: Optional[str] = None,
+    project_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    billable: Optional[bool] = None,
+    tag_ids: Optional[list[str]] = None,
+) -> str:
+    """
+    Update an existing time entry. Only the fields you pass are changed.
+
+    Args:
+        entry_id: ID of the time entry to update
+        start: New start time (ISO format; no offset means local time)
+        end: New end time (ISO format; no offset means local time)
+        description: New description
+        project_id: New project ID. Changing the project without a task_id clears the task.
+        task_id: New task ID
+        billable: New billable flag
+        tag_ids: Replacement list of tag IDs
+
+    Returns:
+        JSON string containing the updated time entry
+    """
+    def given(value):
+        return UNSET if value is None else value
+
+    entry = await client.update_time_entry(
+        entry_id,
+        start=given(start),
+        end=given(end),
+        description=given(description),
+        project_id=given(project_id),
+        task_id=given(task_id),
+        billable=given(billable),
+        tag_ids=given(tag_ids),
+    )
+    return entry.model_dump_json(indent=2)
+
+
+@mcp.tool
+async def delete_time_entry(entry_id: str) -> str:
+    """
+    Delete a single time entry by ID. This cannot be undone.
+
+    Args:
+        entry_id: ID of the time entry to delete
+
+    Returns:
+        Confirmation message
+    """
+    await client.delete_time_entry(entry_id)
+    return json.dumps({"deleted": entry_id})
 
 
 if __name__ == "__main__":

@@ -7,6 +7,10 @@ import httpx
 
 from config import config
 from models import ProjectSummary, Tag, TaskSummary, TimeEntry, User, Workspace
+from timeutil import DateLike, to_clockify_utc
+
+# Sentinel so update_time_entry can tell "not provided" apart from an explicit None.
+UNSET: Any = object()
 
 
 class ClockifyClient:
@@ -33,6 +37,32 @@ class ClockifyClient:
             response = await client.get(url, headers=self.headers, params=params)
             response.raise_for_status()
             return response.json(), response.headers
+
+    async def _send(
+        self,
+        method: str,
+        endpoint: str,
+        json_body: Optional[dict[str, Any]] = None,
+    ) -> Any:
+        """Make a write request (POST/PUT/DELETE) to the Clockify API."""
+        url = f"{self.base_url}{endpoint}"
+        async with httpx.AsyncClient() as client:
+            response = await client.request(
+                method, url, headers=self.headers, json=json_body
+            )
+            if response.is_error:
+                raise RuntimeError(
+                    f"Clockify API {method} {endpoint} failed "
+                    f"({response.status_code}): {response.text}"
+                )
+            if response.status_code == 204 or not response.content:
+                return None
+            return response.json()
+
+    async def get_current_user(self) -> User:
+        """Get the user that owns the API key."""
+        data = await self._get("/user")
+        return User.model_validate(data)
 
     async def get_workspace(self, workspace_id: Optional[str] = None) -> Workspace:
         """Get workspace information."""
@@ -145,32 +175,149 @@ class ClockifyClient:
     async def get_user_time_entries(
         self,
         user_id: str,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date: Optional[DateLike] = None,
+        end_date: Optional[DateLike] = None,
         workspace_id: Optional[str] = None,
         project_id: Optional[str] = None,
         hydrated: bool = True,
-        page_size: int = 50,
+        page_size: int = 200,
     ) -> list[TimeEntry]:
-        """Get time entries for a specific user with optional filters."""
+        """
+        Get all time entries for a user with optional filters, following pagination.
+
+        Dates without an offset are interpreted in the configured local timezone.
+        A date-only end_date includes that whole day.
+        """
         ws_id = workspace_id or self.workspace_id
-        params: dict[str, Any] = {
+        base_params: dict[str, Any] = {
             "hydrated": str(hydrated).lower(),
             "page-size": page_size,
         }
-        
         if start_date:
-            params["start"] = start_date.isoformat()
+            base_params["start"] = to_clockify_utc(start_date)
         if end_date:
-            params["end"] = end_date.isoformat()
+            base_params["end"] = to_clockify_utc(end_date, end_of_day=True)
         if project_id:
-            params["project"] = project_id
+            base_params["project"] = project_id
 
-        data = await self._get(
-            f"/workspaces/{ws_id}/user/{user_id}/time-entries",
-            params=params,
+        entries: list[TimeEntry] = []
+        page = 1
+        while True:
+            params = {**base_params, "page": page}
+            data, headers = await self._get_response(
+                f"/workspaces/{ws_id}/user/{user_id}/time-entries",
+                params=params,
+            )
+            page_entries = [TimeEntry.model_validate(entry) for entry in data]
+            entries.extend(page_entries)
+
+            last_page = str(headers.get("Last-Page", "")).lower() == "true"
+            if last_page or len(page_entries) < page_size:
+                break
+            page += 1
+
+        return entries
+
+    async def create_time_entry(
+        self,
+        start: DateLike,
+        end: DateLike,
+        description: Optional[str] = None,
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        billable: Optional[bool] = None,
+        tag_ids: Optional[list[str]] = None,
+        workspace_id: Optional[str] = None,
+    ) -> TimeEntry:
+        """Create a completed time entry for the API key's user."""
+        ws_id = workspace_id or self.workspace_id
+        body: dict[str, Any] = {
+            "start": to_clockify_utc(start),
+            "end": to_clockify_utc(end),
+        }
+        if description is not None:
+            body["description"] = description
+        if project_id:
+            body["projectId"] = project_id
+        if task_id:
+            body["taskId"] = task_id
+        if billable is not None:
+            body["billable"] = billable
+        if tag_ids:
+            body["tagIds"] = tag_ids
+
+        data = await self._send("POST", f"/workspaces/{ws_id}/time-entries", body)
+        return TimeEntry.model_validate(data)
+
+    async def update_time_entry(
+        self,
+        entry_id: str,
+        start: Any = UNSET,
+        end: Any = UNSET,
+        description: Any = UNSET,
+        project_id: Any = UNSET,
+        task_id: Any = UNSET,
+        billable: Any = UNSET,
+        tag_ids: Any = UNSET,
+        workspace_id: Optional[str] = None,
+    ) -> TimeEntry:
+        """
+        Update a time entry. Only provided fields change; the rest are kept.
+
+        Clockify's PUT replaces the whole entry, so the current entry is fetched and
+        merged first. Changing the project without giving a task clears the task.
+        """
+        ws_id = workspace_id or self.workspace_id
+        current = await self.get_time_entry(entry_id, workspace_id=ws_id, hydrated=False)
+
+        body: dict[str, Any] = {
+            "start": to_clockify_utc(current.time_interval.start),
+            "description": current.description or "",
+            "billable": current.billable,
+        }
+        if current.time_interval.end is not None:
+            body["end"] = to_clockify_utc(current.time_interval.end)
+        if current.project_id:
+            body["projectId"] = current.project_id
+        if current.task_id:
+            body["taskId"] = current.task_id
+        if current.tag_ids:
+            body["tagIds"] = current.tag_ids
+
+        if start is not UNSET:
+            body["start"] = to_clockify_utc(start)
+        if end is not UNSET:
+            body["end"] = to_clockify_utc(end)
+        if description is not UNSET:
+            body["description"] = description or ""
+        if billable is not UNSET:
+            body["billable"] = bool(billable)
+        if tag_ids is not UNSET:
+            body["tagIds"] = tag_ids or []
+        if project_id is not UNSET:
+            if project_id:
+                body["projectId"] = project_id
+            else:
+                body.pop("projectId", None)
+            if task_id is UNSET and project_id != current.project_id:
+                body.pop("taskId", None)
+        if task_id is not UNSET:
+            if task_id:
+                body["taskId"] = task_id
+            else:
+                body.pop("taskId", None)
+
+        data = await self._send(
+            "PUT", f"/workspaces/{ws_id}/time-entries/{entry_id}", body
         )
-        return [TimeEntry.model_validate(entry) for entry in data]
+        return TimeEntry.model_validate(data)
+
+    async def delete_time_entry(
+        self, entry_id: str, workspace_id: Optional[str] = None
+    ) -> None:
+        """Delete a single time entry by ID."""
+        ws_id = workspace_id or self.workspace_id
+        await self._send("DELETE", f"/workspaces/{ws_id}/time-entries/{entry_id}")
 
     async def get_in_progress_time_entries(
         self, workspace_id: Optional[str] = None

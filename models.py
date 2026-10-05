@@ -72,7 +72,8 @@ class TimeEntry(BaseModel):
     task_id: Optional[str] = Field(None, alias="taskId")
     time_interval: TimeInterval = Field(alias="timeInterval")
     workspace_id: str = Field(alias="workspaceId")
-    tags: list[Tag] = Field(default_factory=list)
+    tag_ids: Optional[list[str]] = Field(None, alias="tagIds")
+    tags: Optional[list[Tag]] = Field(default_factory=list)
     project: Optional[Project] = None
     task: Optional[Task] = None
     type: Optional[str] = None
