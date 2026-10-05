@@ -1,6 +1,6 @@
 # Clockify MCP Server
 
-A FastMCP server that provides read-only access to Clockify time tracking data. Query time entries, projects, users, and workspace information through an AI agent.
+A FastMCP server for Clockify time tracking data. Query time entries, projects, tasks, users, and workspace information, and create, update, or delete time entries through an AI agent.
 
 ## Features
 
@@ -40,10 +40,34 @@ uv run main.py
 
 ## Available Tools
 
+### Time Zones
+
+Times without a UTC offset are interpreted in `CLOCKIFY_TIMEZONE` (default `America/Toronto`) and sent to Clockify as UTC. A date-only `end_date` includes that whole day.
+
+### Time Entry Writes
+
+#### `create_time_entry`
+Create a completed time entry for the API key's user.
+
+**Parameters:** `start`, `end` (required, ISO format), `description`, `project_id`, `task_id`, `billable`, `tag_ids` (optional)
+
+#### `update_time_entry`
+Update an existing entry. Only the fields passed are changed. Changing `project_id` without a `task_id` clears the task.
+
+**Parameters:** `entry_id` (required), plus any of `start`, `end`, `description`, `project_id`, `task_id`, `billable`, `tag_ids`
+
+#### `delete_time_entry`
+Delete a single time entry by ID.
+
+**Parameters:** `entry_id` (required)
+
+#### `get_current_user`
+Get the user that owns the API key.
+
 ### Time Entry Queries
 
 #### `get_time_entries`
-Get time entries for a specific user with optional filters.
+Get all time entries for a specific user with optional filters. Pagination is handled automatically.
 
 **Parameters:**
 - `user_id` (required): User ID
@@ -122,7 +146,7 @@ This MCP server is designed to be used with AI agents. Example queries:
 
 ## API Reference
 
-This server uses the [Clockify API v1](https://docs.clockify.me/). All tools are read-only and do not modify any data.
+This server uses the [Clockify API v1](https://docs.clockify.me/). The write tools (`create_time_entry`, `update_time_entry`, `delete_time_entry`) modify data; all other tools are read-only.
 
 ## Project Structure
 
@@ -132,6 +156,7 @@ clockify-mcp-server/
 ├── clockify_client.py   # Clockify API client
 ├── models.py            # Pydantic data models
 ├── config.py            # Configuration management
+├── timeutil.py          # Local-time to UTC conversion
 ├── .env.example         # Environment variables template
 └── README.md            # This file
 ```

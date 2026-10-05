@@ -19,6 +19,7 @@ class ClockifyConfig:
         self.base_url: str = os.getenv(
             "CLOCKIFY_API_URL", "https://api.clockify.me/api/v1"
         )
+        self.timezone: str = os.getenv("CLOCKIFY_TIMEZONE", "America/Toronto")
 
     def validate(self) -> None:
         """Validate that required configuration is present."""
