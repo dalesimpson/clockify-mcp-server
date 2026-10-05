@@ -14,7 +14,8 @@ mcp = FastMCP(
     This server provides access to Clockify time tracking data.
     Use the read tools to query time entries, projects, tasks, tags, users, and
     workspace information. Use create_time_entry, update_time_entry, and
-    delete_time_entry to write time entries for the API key's user.
+    delete_time_entry to write time entries for the API key's user, and
+    create_task to add a task to a project.
     Times without a UTC offset are interpreted in the configured local timezone
     (CLOCKIFY_TIMEZONE, default America/Toronto).
     """,
@@ -258,6 +259,32 @@ async def delete_time_entry(entry_id: str) -> str:
     """
     await client.delete_time_entry(entry_id)
     return json.dumps({"deleted": entry_id})
+
+
+@mcp.tool
+async def create_task(
+    project_id: str,
+    name: str,
+    billable: Optional[bool] = None,
+) -> str:
+    """
+    Create a new active task on a project.
+
+    Fails if a task with the same name (case-insensitive) already exists on the
+    project, including completed tasks.
+
+    Args:
+        project_id: Project ID (see list_projects)
+        name: Task name
+        billable: Whether the task is billable (omit to use the project default)
+
+    Returns:
+        JSON object with the new task's id, name, status, and project_id
+    """
+    task = await client.create_project_task(
+        project_id=project_id, name=name, billable=billable
+    )
+    return json.dumps(task.model_dump(by_alias=False), indent=2)
 
 
 if __name__ == "__main__":

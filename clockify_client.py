@@ -128,6 +128,43 @@ class ClockifyClient:
 
         return tasks
 
+    async def create_project_task(
+        self,
+        project_id: str,
+        name: str,
+        billable: Optional[bool] = None,
+        workspace_id: Optional[str] = None,
+    ) -> TaskSummary:
+        """
+        Create a task on a project.
+
+        Raises ValueError if a task with the same name (case-insensitive) already
+        exists on the project, whether active or done.
+        """
+        ws_id = workspace_id or self.workspace_id
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Task name must not be empty")
+
+        existing = await self.get_project_tasks(project_id, workspace_id=ws_id, is_active=True)
+        existing += await self.get_project_tasks(project_id, workspace_id=ws_id, is_active=False)
+        for task in existing:
+            if task.name.strip().lower() == clean_name.lower():
+                raise ValueError(
+                    f"Task '{task.name}' already exists on this project (id {task.id})"
+                )
+
+        body: dict[str, Any] = {"name": clean_name, "status": "ACTIVE"}
+        if billable is not None:
+            body["billable"] = billable
+        data = await self._send(
+            "POST", f"/workspaces/{ws_id}/projects/{project_id}/tasks", body
+        )
+        task = TaskSummary.model_validate(data)
+        if not task.project_id:
+            task.project_id = project_id
+        return task
+
     async def get_active_project_tasks(
         self,
         project_id: str,
