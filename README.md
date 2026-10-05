@@ -61,6 +61,11 @@ Delete a single time entry by ID.
 
 **Parameters:** `entry_id` (required)
 
+#### `create_task`
+Create a new active task on a project. Fails if a task with the same name already exists on the project (active or done).
+
+**Parameters:** `project_id`, `name` (required), `billable` (optional)
+
 #### `get_current_user`
 Get the user that owns the API key.
 
@@ -146,7 +151,7 @@ This MCP server is designed to be used with AI agents. Example queries:
 
 ## API Reference
 
-This server uses the [Clockify API v1](https://docs.clockify.me/). The write tools (`create_time_entry`, `update_time_entry`, `delete_time_entry`) modify data; all other tools are read-only.
+This server uses the [Clockify API v1](https://docs.clockify.me/). The write tools (`create_time_entry`, `update_time_entry`, `delete_time_entry`, `create_task`) modify data; all other tools are read-only.
 
 ## Project Structure
 

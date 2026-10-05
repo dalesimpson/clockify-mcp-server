@@ -171,6 +171,50 @@ class TimeEntryWriteTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class CreateTaskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_task_posts_after_duplicate_check(self):
+        client = FakeClockifyClient(
+            get_responses=[
+                ([{"id": "t1", "name": "Delivery", "status": "ACTIVE"}], {"Last-Page": "true"}),
+                ([{"id": "t2", "name": "Old", "status": "DONE"}], {"Last-Page": "true"}),
+            ],
+            send_responses=[
+                {"id": "t3", "name": "DevOps", "status": "ACTIVE", "projectId": "project-1"}
+            ],
+        )
+
+        task = await client.create_project_task("project-1", "  DevOps ")
+
+        self.assertEqual(task.id, "t3")
+        self.assertEqual(client.get_calls[0][1]["is-active"], "true")
+        self.assertEqual(client.get_calls[1][1]["is-active"], "false")
+        self.assertEqual(
+            client.send_calls[0],
+            (
+                "POST",
+                "/workspaces/workspace-id/projects/project-1/tasks",
+                {"name": "DevOps", "status": "ACTIVE"},
+            ),
+        )
+
+    async def test_create_task_rejects_duplicate_name(self):
+        client = FakeClockifyClient(
+            get_responses=[
+                ([], {"Last-Page": "true"}),
+                ([{"id": "t2", "name": "devops", "status": "DONE"}], {"Last-Page": "true"}),
+            ]
+        )
+
+        with self.assertRaises(ValueError):
+            await client.create_project_task("project-1", "DevOps")
+        self.assertEqual(client.send_calls, [])
+
+    async def test_create_task_rejects_empty_name(self):
+        client = FakeClockifyClient()
+        with self.assertRaises(ValueError):
+            await client.create_project_task("project-1", "   ")
+
+
 class McpToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_tool_only_passes_given_fields(self):
         config.api_key = "test"
